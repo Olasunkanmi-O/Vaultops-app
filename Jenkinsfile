@@ -6,8 +6,8 @@ pipeline {
         VAULT_ADDR = "https://vault.alasoasiko.co.uk:8200"
 
         // Nexus repositories
-        NEXUS_MAVEN_REPO = "https://nexus.alasoasiko.co.uk:8085/repository/maven-releases/"
-        NEXUS_DOCKER_REGISTRY = "nexus.alasoasiko.co.uk:8085"
+        NEXUS_MAVEN_REPO = "https://nexus.alasoasiko.co.uk/repository/petclinic-maven/"
+        NEXUS_DOCKER_REGISTRY = "https://nexus.alasoasiko.co.uk/repository/petclinic-docker/"
         APPLICATION_NAME = "petclinic-app"
     }
 
@@ -100,19 +100,13 @@ pipeline {
     }
 
     post {
-        success {
-            slackSend(
-                channel: SLACKCHANNEL,
-                color: 'good',
-                message: "Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]' Deployed successfully. Check console output at ${env.BUILD_URL}."
-            )
-        }
-        failure {
-            slackSend(
-                channel: SLACKCHANNEL,
-                color: 'danger',
-                message: "Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]' has failed. Check console output at ${env.BUILD_URL}."
+        always {
+            slackSend (
+                channel: "${SLACK_CHANNEL}",
+                color: currentBuild.currentResult == 'SUCCESS' ? 'good' : 'danger',
+                message: "Job *${env.JOB_NAME}* #${env.BUILD_NUMBER} finished with *${currentBuild.currentResult}*"
             )
         }
     }
+
 }
