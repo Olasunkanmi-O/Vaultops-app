@@ -66,27 +66,41 @@ pipeline {
             }
         }
 
-
         stage('Build & Scan Docker Image') {
             steps {
                 script {
-                    docker.build("${APPLICATION_NAME}:${params.APP_VERSION}", ".")
+                    // Build Docker image using the WAR built by Maven
+                    docker.build("${APPLICATION_NAME}:${params.APP_VERSION}", "--build-arg WAR_FILE=${APPLICATION_NAME}-${params.APP_VERSION}.war .")
+
+                    // Scan image with Trivy
                     sh "trivy image --exit-code 1 --severity HIGH,CRITICAL ${APPLICATION_NAME}:${params.APP_VERSION} || true"
                 }
             }
         }
+        
 
         stage('Push Docker Image to Nexus') {
             steps {
-                withCredentials([usernamePassword(credentialsId: 'nexus-docker-cred', passwordVariable: 'NEXUS_PASS', usernameVariable: 'NEXUS_USER')]) {
+                withCredentials([
+                    usernamePassword(credentialsId: 'nexus-docker-cred', 
+                                    usernameVariable: 'NEXUS_USER', 
+                                    passwordVariable: 'NEXUS_PASS')
+                ]) {
                     sh """
+                        # Login to Nexus Docker registry
                         echo $NEXUS_PASS | docker login ${NEXUS_DOCKER_REGISTRY} -u $NEXUS_USER --password-stdin
+
+                        # Tag the Docker image for Nexus
                         docker tag ${APPLICATION_NAME}:${params.APP_VERSION} ${NEXUS_DOCKER_REGISTRY}/${APPLICATION_NAME}:${params.APP_VERSION}
+
+                        # Push to Nexus
                         docker push ${NEXUS_DOCKER_REGISTRY}/${APPLICATION_NAME}:${params.APP_VERSION}
                     """
                 }
             }
         }
+
+        
 
         stage('Deploy via Ansible') {
             steps {
