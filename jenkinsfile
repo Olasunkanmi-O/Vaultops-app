@@ -1,0 +1,102 @@
+pipeline {
+    agent any
+
+    environment {
+        VAULT_ADDR = "https://vault.alasoasiko.co.uk:8200"
+        NEXUS_MAVEN_REPO = "https://nexus.alasoasiko.co.uk/repository/petclinic-maven/"
+        NEXUS_DOCKER_REGISTRY = "https://nexus.alasoasiko.co.uk/repository/petclinic-docker/"
+        APPLICATION_NAME = "petclinicapps"
+    }
+
+    parameters {
+        string(name: 'APP_VERSION', defaultValue: '1.0.0', description: 'Application version/tag')
+    }
+
+    stages {
+
+        stage('Checkout Code') {
+            steps {
+                checkout([
+                    $class: 'GitSCM',
+                    branches: [[name: '*/main']],
+                    userRemoteConfigs: [[
+                        credentialsId: 'github-cred',
+                        url: 'https://github.com/your-org/your-repo.git'
+                    ]]
+                ])
+            }
+        }
+
+        stage('SonarQube Scan') {
+            steps {
+                withSonarQubeEnv('SonarQube') {
+                    sh "mvn clean verify sonar:sonar"
+                }
+            }
+        }
+
+        stage('Build WAR & Push to Nexus') {
+            steps {
+                script {
+                    // Build the WAR
+                    sh "mvn clean package"
+                    // Determine WAR file dynamically
+                    WAR_FILE = sh(script: "ls target/*.war | head -n 1", returnStdout: true).trim()
+                    // Upload to Nexus Maven repo
+                    nexusArtifactUploader artifacts: [[
+                        artifactId: "${APPLICATION_NAME}",
+                        classifier: '',
+                        file: WAR_FILE,
+                        type: 'war'
+                    ]],
+                    credentialsId: 'nexus-maven-cred',
+                    groupId: 'com.example',
+                    nexusUrl: 'nexus.alasoasiko.co.uk',
+                    nexusVersion: 'nexus3',
+                    repository: 'maven-releases',
+                    version: "${params.APP_VERSION}"
+                }
+            }
+        }
+
+        stage('Build & Scan Docker Image') {
+            steps {
+                script {
+                    docker.build("${APPLICATION_NAME}:${params.APP_VERSION}", ".")
+                    sh "trivy image --exit-code 1 --severity HIGH,CRITICAL ${APPLICATION_NAME}:${params.APP_VERSION} || true"
+                }
+            }
+        }
+
+        stage('Push Docker Image to Nexus') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'nexus-docker-cred', passwordVariable: 'NEXUS_PASS', usernameVariable: 'NEXUS_USER')]) {
+                    sh """
+                        echo $NEXUS_PASS | docker login ${NEXUS_DOCKER_REGISTRY} -u $NEXUS_USER --password-stdin
+                        docker tag ${APPLICATION_NAME}:${params.APP_VERSION} ${NEXUS_DOCKER_REGISTRY}/${APPLICATION_NAME}:${params.APP_VERSION}
+                        docker push ${NEXUS_DOCKER_REGISTRY}/${APPLICATION_NAME}:${params.APP_VERSION}
+                    """
+                }
+            }
+        }
+
+        stage('Deploy via Ansible') {
+            steps {
+                ansiblePlaybook(
+                    playbook: 'ansible/playbooks/deploy_application.yml',
+                    inventory: 'ansible/inventory/aws_ec2.yml',
+                    extras: "-e APP_VERSION=${params.APP_VERSION}"
+                )
+            }
+        }
+    }
+
+    post {
+        success {
+            slackSend (channel: '#devops-notifications', color: 'good', message: "SUCCESS: ${APPLICATION_NAME}:${params.APP_VERSION} deployed successfully!")
+        }
+        failure {
+            slackSend (channel: '#devops-notifications', color: 'danger', message: "FAILURE: Deployment of ${APPLICATION_NAME}:${params.APP_VERSION} failed!")
+        }
+    }
+}
