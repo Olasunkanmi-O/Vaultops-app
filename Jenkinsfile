@@ -48,20 +48,24 @@ pipeline {
                     usernamePassword(credentialsId: 'nexus-maven-cred', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')
                 ]) {
                     sh """
-                        # Set version dynamically from Jenkins parameter
+                        # Override pom.xml version with Jenkins parameter
                         mvn versions:set -DnewVersion=${params.APP_VERSION}
 
-                        # Build WAR using that version
+                        # Build
                         mvn clean package -Dspring.profiles.active=mysql -DskipTests
 
-                        # Upload WAR to Nexus (matches the versioned filename)
+                        # Verify what was built
+                        ls -lh target/
+
+                        # Upload with correct name
                         curl -v -u $NEXUS_USER:$NEXUS_PASS \
-                        --upload-file target/${APPLICATION_NAME}-${params.APP_VERSION}.war \
-                        ${NEXUS_MAVEN_REPO}${APPLICATION_NAME}-${params.APP_VERSION}.war
+                        --upload-file target/spring-petclinic-${params.APP_VERSION}.war \
+                        ${NEXUS_MAVEN_REPO}spring-petclinic-${params.APP_VERSION}.war
                     """
                 }
             }
-}
+        }
+
 
         stage('Build & Scan Docker Image') {
             steps {
