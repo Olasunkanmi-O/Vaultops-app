@@ -90,10 +90,18 @@ pipeline {
 
     post {
         success {
-            slackSend(channel: '#deployments', color: 'good', message: "Application ${APPLICATION_NAME}:${params.APP_VERSION} deployed successfully!")
+            slackSend(
+                channel: SLACKCHANNEL,
+                color: 'good',
+                message: "Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]' Deployed successfully. Check console output at ${env.BUILD_URL}."
+            )
         }
         failure {
-            slackSend(channel: '#deployments', color: 'danger', message: "Deployment failed for ${APPLICATION_NAME}:${params.APP_VERSION}")
+            slackSend(
+                channel: SLACKCHANNEL,
+                color: 'danger',
+                message: "Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]' has failed. Check console output at ${env.BUILD_URL}."
+            )
         }
     }
 }
