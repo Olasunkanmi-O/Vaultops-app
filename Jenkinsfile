@@ -1,66 +1,29 @@
 pipeline {
     agent any
-
-    environment {
-        // Vault address
-        VAULT_ADDR = "https://vault.alasoasiko.co.uk:8200"
-
-        // Nexus repositories
-        NEXUS_MAVEN_REPO = "https://nexus.alasoasiko.co.uk/repository/petclinic-maven/"
-        NEXUS_DOCKER_REGISTRY = "https://nexus.alasoasiko.co.uk/repository/petclinic-docker/"
-        APPLICATION_NAME = "petclinic-app"
+    tools {
+        maven 'maven'  // your Jenkins Maven tool name
     }
-
     parameters {
-        string(
-            name: 'APP_VERSION', 
-            defaultValue: '1.0.0', 
-            description: 'Application version/tag'
-        )
+        string(name: 'APP_VERSION', defaultValue: '2.4.2', description: 'Application version/tag')
+    }
+    environment {
+        APPLICATION_NAME = 'spring-petclinic'
+        NEXUS_MAVEN_REPO = 'https://nexus.alasoasiko.co.uk:8085/repository/maven-releases/'
+        NEXUS_DOCKER_REGISTRY = 'nexus.alasoasiko.co.uk:8085'
+        SLACK_CHANNEL = '#devops-alerts'
     }
 
     stages {
-
-        stage('Checkout Code') {
-            steps {
-                checkout([
-                    $class: 'GitSCM',
-                    branches: [[name: '*/main']],
-                    userRemoteConfigs: [[
-                        credentialsId: 'github-cred',
-                        url: 'https://github.com/your-org/your-repo.git'
-                    ]]
-                ])
-            }
-        }
-
-        stage('SonarQube Scan') {
-            steps {
-                withSonarQubeEnv('SonarQube') {
-                    sh "mvn clean verify sonar:sonar -Dspring.profiles.active=mysql -DskipTests"
-                }
-            }
-        }
-
         stage('Build & Push WAR to Nexus') {
             steps {
-                withCredentials([
-                    usernamePassword(credentialsId: 'nexus-maven-cred', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')
-                ]) {
+                withCredentials([usernamePassword(credentialsId: 'nexus-maven-cred', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
                     sh """
-                        # Override pom.xml version with Jenkins parameter
-                        mvn versions:set -DnewVersion=${params.APP_VERSION}
+                        # Build WAR with Maven, skipping tests
+                        mvn clean package -Dspring.profiles.active=mysql -DskipTests -DfinalName=${APPLICATION_NAME}-${params.APP_VERSION}
 
-                        # Build
-                        mvn clean package -Dspring.profiles.active=mysql -DskipTests
-
-                        # Verify what was built
-                        ls -lh target/
-
-                        # Upload with correct name
-                        curl -v -u $NEXUS_USER:$NEXUS_PASS \
-                        --upload-file target/spring-petclinic-${params.APP_VERSION}.war \
-                        ${NEXUS_MAVEN_REPO}spring-petclinic-${params.APP_VERSION}.war
+                        # Upload WAR to Nexus
+                        curl -v -u $NEXUS_USER:$NEXUS_PASS --upload-file target/${APPLICATION_NAME}-${params.APP_VERSION}.war \
+                        ${NEXUS_MAVEN_REPO}${APPLICATION_NAME}-${params.APP_VERSION}.war
                     """
                 }
             }
@@ -69,6 +32,7 @@ pipeline {
         stage('Prepare WAR for Docker') {
             steps {
                 sh """
+                # Copy/rename WAR to ROOT.war for Tomcat
                 cp target/${APPLICATION_NAME}-${params.APP_VERSION}.war target/ROOT.war
                 """
             }
@@ -77,55 +41,39 @@ pipeline {
         stage('Build & Scan Docker Image') {
             steps {
                 script {
+                    // Build Docker image using the prepared ROOT.war
                     docker.build("${APPLICATION_NAME}:${params.APP_VERSION}", ".")
+
+                    // Scan Docker image with Trivy
                     sh "trivy image --exit-code 1 --severity HIGH,CRITICAL ${APPLICATION_NAME}:${params.APP_VERSION} || true"
                 }
             }
         }
 
-
         stage('Push Docker Image to Nexus') {
             steps {
-                withCredentials([
-                    usernamePassword(credentialsId: 'nexus-docker-cred', 
-                                    usernameVariable: 'NEXUS_USER', 
-                                    passwordVariable: 'NEXUS_PASS')
-                ]) {
+                withCredentials([usernamePassword(credentialsId: 'nexus-docker-cred', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
                     sh """
                         # Login to Nexus Docker registry
                         echo $NEXUS_PASS | docker login ${NEXUS_DOCKER_REGISTRY} -u $NEXUS_USER --password-stdin
 
-                        # Tag the Docker image for Nexus
+                        # Tag and push Docker image
                         docker tag ${APPLICATION_NAME}:${params.APP_VERSION} ${NEXUS_DOCKER_REGISTRY}/${APPLICATION_NAME}:${params.APP_VERSION}
-
-                        # Push to Nexus
                         docker push ${NEXUS_DOCKER_REGISTRY}/${APPLICATION_NAME}:${params.APP_VERSION}
                     """
                 }
-            }
-        }
-
-        
-
-        stage('Deploy via Ansible') {
-            steps {
-                ansiblePlaybook(
-                    playbook: 'ansible/playbooks/deploy_application.yml',
-                    inventory: 'ansible/inventory/aws_ec2.yml',
-                    extras: "-e APP_VERSION=${params.APP_VERSION}"
-                )
             }
         }
     }
 
     post {
         always {
+            // Slack notification for build result
             slackSend (
                 channel: "${SLACK_CHANNEL}",
                 color: currentBuild.currentResult == 'SUCCESS' ? 'good' : 'danger',
-                message: "Job *${env.JOB_NAME}* #${env.BUILD_NUMBER} finished with *${currentBuild.currentResult}*"
+                message: "Job *${env.JOB_NAME}* #${env.BUILD_NUMBER} finished with *${currentBuild.currentResult}*. WAR version: ${params.APP_VERSION}"
             )
         }
     }
-
 }
