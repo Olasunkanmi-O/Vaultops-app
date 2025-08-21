@@ -66,18 +66,23 @@ pipeline {
             }
         }
 
+        stage('Prepare WAR for Docker') {
+            steps {
+                sh """
+                cp target/${APPLICATION_NAME}-${params.APP_VERSION}.war target/ROOT.war
+                """
+            }
+        }
+
         stage('Build & Scan Docker Image') {
             steps {
                 script {
-                    // Build Docker image using the WAR built by Maven
-                    docker.build("${APPLICATION_NAME}:${params.APP_VERSION}", "--build-arg WAR_FILE=${APPLICATION_NAME}-${params.APP_VERSION}.war .")
-
-                    // Scan image with Trivy
+                    docker.build("${APPLICATION_NAME}:${params.APP_VERSION}", ".")
                     sh "trivy image --exit-code 1 --severity HIGH,CRITICAL ${APPLICATION_NAME}:${params.APP_VERSION} || true"
                 }
             }
         }
-        
+
 
         stage('Push Docker Image to Nexus') {
             steps {
