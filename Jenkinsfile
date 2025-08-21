@@ -1,7 +1,7 @@
 pipeline {
     agent any
     tools {
-        maven 'maven'  // your Jenkins Maven tool name
+        maven 'Maven'  // your Jenkins Maven tool name
     }
     parameters {
         string(name: 'APP_VERSION', defaultValue: '2.4.2', description: 'Application version/tag')
