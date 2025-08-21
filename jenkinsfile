@@ -12,7 +12,11 @@ pipeline {
     }
 
     parameters {
-        string(name: 'APP_VERSION', defaultValue: '1.0.0', description: 'Application version/tag')
+        string(
+            name: 'APP_VERSION', 
+            defaultValue: '1.0.0', 
+            description: 'Application version/tag'
+        )
     }
 
     stages {
