@@ -1,16 +1,15 @@
-# Use an official Tomcat base image
-FROM tomcat:9.0-jdk17
+# Use an official java kit
+FROM openjdk:11-jdk-slim
 
 # Maintainer label
 LABEL maintainer="ola.m.owolabi@outlook.com"
 
-# Remove default ROOT webapp
-RUN rm -rf /usr/local/tomcat/webapps/*
+WORKDIR /app
 
-# Copy the WAR built by Maven into the Tomcat webapps directory
-COPY target/spring-petclinic-2.4.2.war /usr/local/tomcat/webapps/ROOT.war
+# Copy your WAR
+COPY target/spring-petclinic-2.4.2.war .
 
-# Expose the port Tomcat runs on
+# Expose the app port 
 EXPOSE 8080
 
 # Environment variables for Spring Boot (to be injected at runtime)
@@ -19,5 +18,5 @@ ENV SPRING_DATASOURCE_USERNAME=
 ENV SPRING_DATASOURCE_PASSWORD=
 ENV SPRING_PROFILES_ACTIVE=
 
-# Start Tomcat
-CMD ["catalina.sh", "run"]
+# Run the WAR using embedded Tomcat
+ENTRYPOINT ["java","-jar","/app/spring-petclinic-2.4.2.war"]
